@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>에브리타임 맛집 지도 - 경성대 주변</title>
+    <meta name="description" content="에브리타임에서 추천된 경성대 주변 맛집을 네이버 지도에서 확인하세요.">
+    <link rel="stylesheet" href="style.css">
+
+    <!--
+    ============================================================
+    네이버 Maps JavaScript API v3
+    ============================================================
+    [설정 방법]
+    1. 아래 YOUR_NCP_CLIENT_ID를 네이버 클라우드 플랫폼에서 발급받은
+       Client ID로 교체하세요.
+    2. ncloud.com > 콘솔 > AI·NAVER API > Application 에서 등록 가능
+    3. Web Dynamic Map + Geocoding 서비스를 선택하세요.
+    4. 서비스 URL에 localhost 또는 실제 도메인을 등록하세요.
+
+    [API 키가 없는 경우]
+    스크립트가 로드되지 않으면 자동으로 Mock 지도 모드로 전환됩니다.
+    -->
+    <script type="text/javascript"
+            src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=x5rnooiysh&submodules=geocoder"
+            onerror="handleMapLoadError()">
+    </script>
+</head>
+<body>
+
+    <!-- ============================== -->
+    <!-- 상단 헤더 영역                   -->
+    <!-- ============================== -->
+    <header class="header">
+        <div class="header-content">
+            <h1 class="header-title">
+                <span class="header-icon">&#127860;</span>
+                에브리타임 맛집 지도
+            </h1>
+            <p class="header-subtitle" id="headerSubtitle">경성대학교 주변 맛집을 지도에서 확인하세요</p>
+        </div>
+        <div class="header-stats" id="headerStats">
+            <!-- JS에서 동적으로 채움 -->
+        </div>
+    </header>
+
+    <!-- ============================== -->
+    <!-- 메인 콘텐츠 영역                  -->
+    <!-- ============================== -->
+    <main class="main-container">
+        <!-- 좌측: 음식점 리스트 패널 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2 class="sidebar-title">매칭된 음식점</h2>
+                <div class="filter-group">
+                    <select id="categoryFilter" class="filter-select">
+                        <option value="all">전체 카테고리</option>
+                    </select>
+                </div>
+            </div>
+            <ul class="restaurant-list" id="restaurantList">
+                <!-- JS에서 동적으로 채움 -->
+            </ul>
+        </aside>
+
+        <!-- 우측: 네이버 지도 -->
+        <div class="map-container" id="mapContainer">
+            <div id="map" class="map"></div>
+            <!-- API 키 없을 때 표시되는 폴백 메시지 -->
+            <div id="mapFallback" class="map-fallback" style="display:none;">
+                <div class="fallback-content">
+                    <p class="fallback-icon">&#128506;</p>
+                    <h2>네이버 지도 API 키가 필요합니다</h2>
+                    <p>index.html의 <code>YOUR_NCP_CLIENT_ID</code>를<br>발급받은 키로 교체하세요.</p>
+                    <p class="fallback-hint">아래에 JSON 데이터가 표시됩니다.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ============================== -->
+    <!-- 하단: JSON 데이터 뷰어            -->
+    <!-- ============================== -->
+    <section class="json-viewer-section" id="jsonViewerSection">
+        <div class="json-viewer-header" id="jsonViewerToggle">
+            <h2>&#128196; JSON 데이터 뷰어</h2>
+            <span class="toggle-arrow" id="toggleArrow">&#9650;</span>
+        </div>
+        <div class="json-viewer-body" id="jsonViewerBody">
+            <pre id="jsonOutput" class="json-output">데이터를 로드 중...</pre>
+        </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- JavaScript: 지도 + 데이터 로직    -->
+    <!-- ============================== -->
+    <script>
+    // ==========================================================================
+    // 전역 변수
+    // ==========================================================================
+    let naverMap = null;           // 네이버 지도 객체
+    let markers = [];              // 마커 배열
+    let infoWindows = [];          // 정보창 배열
+    let restaurantData = null;     // 로드된 전체 데이터
+    let mapAvailable = false;      // 네이버 지도 API 사용 가능 여부
+    let radiusCircle = null;       // 반경 원
+
+    // 카테고리별 마커 색상 매핑
+    const CATEGORY_COLORS = {
+        '한식':   '#E74C3C',
+        '일식':   '#3498DB',
+        '중식':   '#F39C12',
+        '양식':   '#2ECC71',
+        '카페':   '#9B59B6',
+        '패스트푸드': '#E67E22',
+        '치킨':   '#E91E63',
+        '분식':   '#FF5722',
+        '기타':   '#95A5A6',
+    };
+
+    // ==========================================================================
+    // 네이버 지도 API 로드 실패 핸들러
+    // ==========================================================================
+    function handleMapLoadError() {
+        console.warn('네이버 지도 API 로드 실패 - Mock 모드로 전환');
+        mapAvailable = false;
+    }
+
+    // ==========================================================================
+    // 초기화
+    // ==========================================================================
+    document.addEventListener('DOMContentLoaded', function() {
+        // 네이버 지도 API 사용 가능 여부 확인
+        mapAvailable = (typeof naver !== 'undefined' && typeof naver.maps !== 'undefined');
+
+        // 데이터 로드
+        loadData();
+
+        // JSON 뷰어 토글 이벤트
+        document.getElementById('jsonViewerToggle').addEventListener('click', toggleJsonViewer);
+
+        // 카테고리 필터 이벤트
+        document.getElementById('categoryFilter').addEventListener('change', filterByCategory);
+    });
+
+    // ==========================================================================
+    // 데이터 로드 (matched_results.json)
+    // ==========================================================================
+    function loadData() {
+        // 로컬 파일에서 데이터 로드 시도
+        fetch('../data/matched_results.json')
+            .then(response => {
+                if (!response.ok) throw new Error('파일 없음');
+                return response.json();
+            })
+            .then(data => {
+                restaurantData = data;
+                initializeApp(data);
+            })
+            .catch(error => {
+                console.warn('matched_results.json 로드 실패, 기본 경로 시도:', error);
+                // 대체 경로 시도
+                fetch('matched_results.json')
+                    .then(response => {
+                        if (!response.ok) throw new Error('파일 없음');
+                        return response.json();
+                    })
+                    .then(data => {
+                        restaurantData = data;
+                        initializeApp(data);
+                    })
+                    .catch(err => {
+                        console.warn('데이터 파일을 찾을 수 없음, 데모 데이터 사용');
+                        loadDemoData();
+                    });
+            });
+    }
+
+    // ==========================================================================
+    // 데모 데이터 (파일 로드 실패 시 사용)
+    // ==========================================================================
+    function loadDemoData() {
+        const demoData = {
+            metadata: {
+                school_name: "경성대학교",
+                school_lat: 35.1421,
+                school_lng: 129.0669,
+                radius_km: 10,
+                generated_at: new Date().toISOString(),
+                total_input: 8,
+                matched_count: 8,
+                unmatched_count: 0
+            },
+            matched_restaurants: [
+                {
+                    id: "demo_001", name: "홍콩반점 경성대점",
+                    category: "중국식>중국요리", address: "부산 남구 대연동 55-1",
+                    road_address: "부산 남구 수영로 316", phone: "051-621-0410",
+                    lat: 35.1385, lng: 129.0985, distance_km: 2.8,
+                    crawled_data: { visitor_review_count: 128, blog_review_count: 45, rating: "4.2", keywords: ["짬뽕 맛집", "가성비"] }
+                },
+                {
+                    id: "demo_002", name: "스시로 부산대연점",
+                    category: "일식>초밥,롤", address: "부산 남구 대연동 120-3",
+                    road_address: "부산 남구 용소로 15", phone: "051-555-1234",
+                    lat: 35.1400, lng: 129.0750, distance_km: 1.2,
+                    crawled_data: { visitor_review_count: 256, blog_review_count: 89, rating: "4.5", keywords: ["초밥 맛집", "가족모임"] }
+                },
+                {
+                    id: "demo_003", name: "맘스터치 경성대점",
+                    category: "패스트푸드>햄버거", address: "부산 남구 대연3동 49-16",
+                    road_address: "부산 남구 수영로328번길 3", phone: "051-622-8282",
+                    lat: 35.1415, lng: 129.0680, distance_km: 0.3,
+                    crawled_data: { visitor_review_count: 312, blog_review_count: 67, rating: "4.0", keywords: ["싸이버거", "가성비"] }
+                },
+                {
+                    id: "demo_004", name: "역전할머니맥주 경성대점",
+                    category: "한식>주점", address: "부산 남구 대연3동 50-2",
+                    road_address: "부산 남구 수영로328번길 10", phone: "051-628-0099",
+                    lat: 35.1418, lng: 129.0690, distance_km: 0.5,
+                    crawled_data: { visitor_review_count: 89, blog_review_count: 32, rating: "3.8", keywords: ["생맥주", "안주 맛집"] }
+                },
+                {
+                    id: "demo_005", name: "깐부치킨 대연점",
+                    category: "한식>치킨", address: "부산 남구 대연동 88-5",
+                    road_address: "부산 남구 용소로19번길 5", phone: "051-634-5678",
+                    lat: 35.1390, lng: 129.0700, distance_km: 0.8,
+                    crawled_data: { visitor_review_count: 145, blog_review_count: 55, rating: "4.3", keywords: ["바삭치킨", "야식"] }
+                },
+                {
+                    id: "demo_006", name: "백종원의원조쌈밥 경성대점",
+                    category: "한식>쌈밥", address: "부산 남구 대연3동 51-10",
+                    road_address: "부산 남구 수영로 320", phone: "051-627-3344",
+                    lat: 35.1410, lng: 129.0675, distance_km: 0.4,
+                    crawled_data: { visitor_review_count: 210, blog_review_count: 78, rating: "4.1", keywords: ["쌈밥", "한식 맛집"] }
+                },
+                {
+                    id: "demo_007", name: "이디야커피 경성대점",
+                    category: "카페>커피전문점", address: "부산 남구 대연3동 52-1",
+                    road_address: "부산 남구 수영로 322", phone: "051-625-1100",
+                    lat: 35.1412, lng: 129.0672, distance_km: 0.3,
+                    crawled_data: { visitor_review_count: 95, blog_review_count: 28, rating: "3.9", keywords: ["아메리카노", "카공"] }
+                },
+                {
+                    id: "demo_008", name: "오봉집 대연점",
+                    category: "한식>감자탕", address: "부산 남구 대연동 120-5",
+                    road_address: "부산 남구 용소로 20", phone: "051-636-7890",
+                    lat: 35.1395, lng: 129.0710, distance_km: 0.9,
+                    crawled_data: { visitor_review_count: 178, blog_review_count: 62, rating: "4.4", keywords: ["감자탕", "뼈해장국"] }
+                }
+            ],
+            unmatched_names: []
+        };
+
+        restaurantData = demoData;
+        initializeApp(demoData);
+    }
+
+    // ==========================================================================
+    // 앱 초기화
+    // ==========================================================================
+    function initializeApp(data) {
+        const meta = data.metadata;
+        const restaurants = data.matched_restaurants || [];
+
+        // 헤더 정보 업데이트
+        document.getElementById('headerSubtitle').textContent =
+            `${meta.school_name} 반경 ${meta.radius_km}km 내 맛집`;
+
+        document.getElementById('headerStats').innerHTML = `
+            <div class="stat-item">
+                <span class="stat-number">${restaurants.length}</span>
+                <span class="stat-label">매칭 음식점</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">${(data.unmatched_names || []).length}</span>
+                <span class="stat-label">미매칭</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">${meta.radius_km}km</span>
+                <span class="stat-label">검색 반경</span>
+            </div>
+        `;
+
+        // 카테고리 필터 생성
+        populateCategoryFilter(restaurants);
+
+        // 음식점 리스트 렌더링
+        renderRestaurantList(restaurants);
+
+        // 지도 초기화
+        if (mapAvailable) {
+            initMap(meta, restaurants);
+        } else {
+            showMapFallback();
+        }
+
+        // JSON 뷰어에 데이터 표시
+        document.getElementById('jsonOutput').textContent =
+            JSON.stringify(data, null, 2);
+    }
+
+    // ==========================================================================
+    // 카테고리 필터
+    // ==========================================================================
+    function populateCategoryFilter(restaurants) {
+        const categories = new Set();
+        restaurants.forEach(r => {
+            const mainCat = (r.category || '기타').split('>')[0];
+            categories.add(mainCat);
+        });
+
+        const select = document.getElementById('categoryFilter');
+        categories.forEach(cat => {
+            const option = document.createElement('option');
+            option.value = cat;
+            option.textContent = cat;
+            select.appendChild(option);
+        });
+    }
+
+    function filterByCategory() {
+        const selected = document.getElementById('categoryFilter').value;
+        const restaurants = restaurantData.matched_restaurants || [];
+
+        if (selected === 'all') {
+            renderRestaurantList(restaurants);
+        } else {
+            const filtered = restaurants.filter(r =>
+                (r.category || '').startsWith(selected)
+            );
+            renderRestaurantList(filtered);
+        }
+    }
+
+    // ==========================================================================
+    // 사이드바 음식점 리스트
+    // ==========================================================================
+    function renderRestaurantList(restaurants) {
+        const list = document.getElementById('restaurantList');
+        list.innerHTML = '';
+
+        if (restaurants.length === 0) {
+            list.innerHTML = '<li class="empty-message">매칭된 음식점이 없습니다.</li>';
+            return;
+        }
+
+        restaurants.forEach((rest, index) => {
+            const mainCat = (rest.category || '기타').split('>')[0];
+            const color = getCategoryColor(mainCat);
+            const cd = rest.crawled_data || {};
+            const distance = rest.distance_km < 1
+                ? `${Math.round(rest.distance_km * 1000)}m`
+                : `${rest.distance_km.toFixed(1)}km`;
+
+            const li = document.createElement('li');
+            li.className = 'restaurant-item';
+            li.id = `rest-item-${rest.id}`;
+            li.innerHTML = `
+                <div class="item-header">
+                    <span class="category-badge" style="background:${color}">${mainCat}</span>
+                    <span class="distance-badge">${distance}</span>
+                </div>
+                <h3 class="item-name">${rest.name}</h3>
+                <p class="item-address">${rest.road_address || rest.address || 'N/A'}</p>
+                <div class="item-stats">
+                    <span class="stat" title="방문자 리뷰">&#128172; ${cd.visitor_review_count || 0}</span>
+                    <span class="stat" title="블로그 리뷰">&#128221; ${cd.blog_review_count || 0}</span>
+                    ${cd.rating && cd.rating !== 'N/A' ? `<span class="stat rating" title="평점">&#11088; ${cd.rating}</span>` : ''}
+                </div>
+                ${cd.keywords && cd.keywords.length > 0 ? `
+                    <div class="item-keywords">
+                        ${cd.keywords.map(k => `<span class="keyword">${k}</span>`).join('')}
+                    </div>
+                ` : ''}
+            `;
+
+            // 클릭 시 지도에서 해당 마커 포커스
+            li.addEventListener('click', () => focusMarker(index, rest));
+            list.appendChild(li);
+        });
+    }
+
+    // ==========================================================================
+    // 네이버 지도 초기화
+    // ==========================================================================
+    function initMap(meta, restaurants) {
+        const schoolPosition = new naver.maps.LatLng(meta.school_lat, meta.school_lng);
+
+        // 지도 생성
+        naverMap = new naver.maps.Map('map', {
+            center: schoolPosition,
+            zoom: 14,
+            mapTypeControl: true,
+            zoomControl: true,
+            zoomControlOptions: {
+                position: naver.maps.Position.TOP_RIGHT,
+            },
+        });
+
+        // 반경 10km 원형 오버레이
+        radiusCircle = new naver.maps.Circle({
+            map: naverMap,
+            center: schoolPosition,
+            radius: meta.radius_km * 1000, // m 단위
+            strokeColor: '#3498DB',
+            strokeOpacity: 0.6,
+            strokeWeight: 2,
+            fillColor: '#3498DB',
+            fillOpacity: 0.08,
+        });
+
+        // 학교 마커 (빨간색 핀)
+        new naver.maps.Marker({
+            position: schoolPosition,
+            map: naverMap,
+            title: meta.school_name,
+            icon: {
+                content: `<div style="
+                    background:#E74C3C;
+                    color:white;
+                    padding:6px 12px;
+                    border-radius:20px;
+                    font-size:13px;
+                    font-weight:bold;
+                    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+                    white-space:nowrap;
+                ">&#127979; ${meta.school_name}</div>`,
+                anchor: new naver.maps.Point(60, 20),
+            },
+        });
+
+        // 음식점 마커 생성
+        restaurants.forEach((rest, index) => {
+            addMarker(rest, index);
+        });
+    }
+
+    // ==========================================================================
+    // 마커 생성
+    // ==========================================================================
+    function addMarker(rest, index) {
+        if (!naverMap) return;
+
+        const position = new naver.maps.LatLng(rest.lat, rest.lng);
+        const mainCat = (rest.category || '기타').split('>')[0];
+        const color = getCategoryColor(mainCat);
+
+        // 마커 아이콘 (카테고리별 색상 원)
+        const marker = new naver.maps.Marker({
+            position: position,
+            map: naverMap,
+            title: rest.name,
+            icon: {
+                content: `<div style="
+                    width:14px; height:14px;
+                    background:${color};
+                    border:3px solid white;
+                    border-radius:50%;
+                    box-shadow:0 2px 6px rgba(0,0,0,0.4);
+                    cursor:pointer;
+                "></div>`,
+                anchor: new naver.maps.Point(10, 10),
+            },
+        });
+
+        // 정보창 (InfoWindow) - 클릭 시 표시
+        const cd = rest.crawled_data || {};
+        const infoContent = `
+            <div style="padding:14px; min-width:240px; font-family:'Pretendard','Noto Sans KR',sans-serif;">
+                <h3 style="margin:0 0 8px; font-size:16px; color:#2C3E50;">
+                    <span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:50%;margin-right:6px;"></span>
+                    ${rest.name}
+                </h3>
+                <p style="margin:0 0 4px; color:#7F8C8D; font-size:13px;">${rest.category || ''}</p>
+                <p style="margin:0 0 8px; color:#555; font-size:13px;">${rest.road_address || rest.address || ''}</p>
+                <div style="display:flex; gap:12px; margin-bottom:8px; font-size:13px;">
+                    <span>&#128172; 리뷰 ${cd.visitor_review_count || 0}</span>
+                    <span>&#128221; 블로그 ${cd.blog_review_count || 0}</span>
+                    ${cd.rating && cd.rating !== 'N/A' ? `<span>&#11088; ${cd.rating}</span>` : ''}
+                </div>
+                ${rest.phone ? `<p style="margin:0; font-size:13px; color:#3498DB;">${rest.phone}</p>` : ''}
+                <p style="margin:4px 0 0; font-size:12px; color:#95A5A6;">
+                    학교에서 ${rest.distance_km < 1 ? Math.round(rest.distance_km * 1000) + 'm' : rest.distance_km.toFixed(1) + 'km'}
+                </p>
+            </div>
+        `;
+
+        const infoWindow = new naver.maps.InfoWindow({
+            content: infoContent,
+            borderWidth: 0,
+            backgroundColor: 'white',
+            anchorSize: new naver.maps.Size(12, 12),
+            pixelOffset: new naver.maps.Point(0, -4),
+        });
+
+        // 마커 클릭 이벤트
+        naver.maps.Event.addListener(marker, 'click', function() {
+            // 다른 정보창 모두 닫기
+            infoWindows.forEach(iw => iw.close());
+            infoWindow.open(naverMap, marker);
+        });
+
+        markers.push(marker);
+        infoWindows.push(infoWindow);
+    }
+
+    // ==========================================================================
+    // 마커 포커스 (사이드바 클릭 시)
+    // ==========================================================================
+    function focusMarker(index, rest) {
+        // 사이드바 아이템 하이라이트
+        document.querySelectorAll('.restaurant-item').forEach(el => el.classList.remove('active'));
+        const item = document.getElementById(`rest-item-${rest.id}`);
+        if (item) item.classList.add('active');
+
+        // 지도가 있으면 해당 위치로 이동
+        if (naverMap && markers[index]) {
+            const position = new naver.maps.LatLng(rest.lat, rest.lng);
+            naverMap.setCenter(position);
+            naverMap.setZoom(16);
+
+            // 정보창 열기
+            infoWindows.forEach(iw => iw.close());
+            infoWindows[index].open(naverMap, markers[index]);
+        }
+    }
+
+    // ==========================================================================
+    // 지도 API 없을 때 폴백 표시
+    // ==========================================================================
+    function showMapFallback() {
+        document.getElementById('map').style.display = 'none';
+        document.getElementById('mapFallback').style.display = 'flex';
+    }
+
+    // ==========================================================================
+    // JSON 뷰어 토글
+    // ==========================================================================
+    function toggleJsonViewer() {
+        const body = document.getElementById('jsonViewerBody');
+        const arrow = document.getElementById('toggleArrow');
+        const isHidden = body.style.display === 'none';
+        body.style.display = isHidden ? 'block' : 'none';
+        arrow.textContent = isHidden ? '\u25B2' : '\u25BC';
+    }
+
+    // ==========================================================================
+    // 카테고리별 색상 반환
+    // ==========================================================================
+    function getCategoryColor(category) {
+        for (const [key, color] of Object.entries(CATEGORY_COLORS)) {
+            if (category.includes(key)) return color;
+        }
+        return CATEGORY_COLORS['기타'];
+    }
+    </script>
+
+</body>
+</html>

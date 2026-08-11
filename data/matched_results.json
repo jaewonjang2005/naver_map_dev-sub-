@@ -1,0 +1,123 @@
+{
+  "metadata": {
+    "school_name": "경성대학교",
+    "school_lat": 35.1421,
+    "school_lng": 129.0669,
+    "radius_km": 10,
+    "generated_at": "2026-08-11T10:50:42.381317",
+    "total_input": 7,
+    "matched_count": 4,
+    "unmatched_count": 3
+  },
+  "matched_restaurants": [
+    {
+      "id": "rest_demo_001",
+      "name": "홍콩반점 경성대점",
+      "name_normalized": "홍콩반점경성대점",
+      "category": "중국식>중국요리",
+      "address": "부산 남구 대연동 55-1",
+      "road_address": "부산 남구 수영로 316",
+      "phone": "051-621-0410",
+      "lat": 35.1385,
+      "lng": 129.0985,
+      "distance_km": 2.8,
+      "naver_link": "",
+      "description": "중화요리 전문점",
+      "crawled_data": {
+        "visitor_review_count": 128,
+        "blog_review_count": 45,
+        "rating": "4.2",
+        "keywords": [
+          "짬뽕 맛집",
+          "가성비"
+        ]
+      },
+      "source": "demo",
+      "search_query": "경성대 중식",
+      "collected_at": "2026-08-11T10:50:28.480986"
+    },
+    {
+      "id": "rest_demo_003",
+      "name": "맘스터치 경성대점",
+      "name_normalized": "맘스터치경성대점",
+      "category": "패스트푸드>햄버거",
+      "address": "부산 남구 대연3동 49-16",
+      "road_address": "부산 남구 수영로328번길 3",
+      "phone": "051-622-8282",
+      "lat": 35.1415,
+      "lng": 129.068,
+      "distance_km": 0.3,
+      "naver_link": "",
+      "description": "싸이버거 맛집",
+      "crawled_data": {
+        "visitor_review_count": 312,
+        "blog_review_count": 67,
+        "rating": "4.0",
+        "keywords": [
+          "싸이버거",
+          "가성비 햄버거"
+        ]
+      },
+      "source": "demo",
+      "search_query": "경성대 햄버거",
+      "collected_at": "2026-08-11T10:50:28.481018"
+    },
+    {
+      "id": "rest_demo_004",
+      "name": "역전할머니맥주 경성대점",
+      "name_normalized": "역전할머니맥주경성대점",
+      "category": "한식>주점",
+      "address": "부산 남구 대연3동 50-2",
+      "road_address": "부산 남구 수영로328번길 10",
+      "phone": "051-628-0099",
+      "lat": 35.1418,
+      "lng": 129.069,
+      "distance_km": 0.5,
+      "naver_link": "",
+      "description": "생맥주 전문점",
+      "crawled_data": {
+        "visitor_review_count": 89,
+        "blog_review_count": 32,
+        "rating": "3.8",
+        "keywords": [
+          "생맥주",
+          "안주 맛집"
+        ]
+      },
+      "source": "demo",
+      "search_query": "경성대 맛집",
+      "collected_at": "2026-08-11T10:50:28.481020"
+    },
+    {
+      "id": "rest_demo_007",
+      "name": "이디야커피 경성대점",
+      "name_normalized": "이디야커피경성대점",
+      "category": "카페>커피전문점",
+      "address": "부산 남구 대연3동 52-1",
+      "road_address": "부산 남구 수영로 322",
+      "phone": "051-625-1100",
+      "lat": 35.1412,
+      "lng": 129.0672,
+      "distance_km": 0.3,
+      "naver_link": "",
+      "description": "커피 전문점",
+      "crawled_data": {
+        "visitor_review_count": 95,
+        "blog_review_count": 28,
+        "rating": "3.9",
+        "keywords": [
+          "아메리카노",
+          "카공"
+        ]
+      },
+      "source": "demo",
+      "search_query": "경성대 카페",
+      "collected_at": "2026-08-11T10:50:28.481028"
+    }
+  ],
+  "unmatched_names": [
+    "용소골칼국수",
+    "하삼동커피",
+    "코코노카"
+  ]
+}
