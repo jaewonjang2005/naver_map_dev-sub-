@@ -45,7 +45,7 @@ DEMO_MODE = not (NAVER_CLIENT_ID and NAVER_CLIENT_SECRET)
 SCHOOL_NAME = "경성대학교"
 SCHOOL_LAT = 35.1421    # 위도 (latitude)
 SCHOOL_LNG = 129.0669   # 경도 (longitude)
-SEARCH_RADIUS_KM = 10   # 검색 반경 (km)
+SEARCH_RADIUS_KM = 0.7  # 검색 반경 (km) - 700m
 
 # ==============================================================================
 # 검색 카테고리 리스트
