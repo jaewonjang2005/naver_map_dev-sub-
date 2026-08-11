@@ -61,8 +61,8 @@ def search_naver_local(query, display=5, start=1):
         None: API 호출 실패 시
     """
     headers = {
-        "X-Naver-Client-Id": config.NAVER_CLIENT_ID,
-        "X-Naver-Client-Secret": config.NAVER_CLIENT_SECRET,
+        "X-NCP-APIGW-API-KEY-ID": config.NAVER_CLIENT_ID,
+        "X-NCP-APIGW-API-KEY": config.NAVER_CLIENT_SECRET,
     }
 
     params = {
@@ -93,6 +93,32 @@ def search_naver_local(query, display=5, start=1):
         print(f"  [네트워크 오류] {e}")
         return None
 
+def search_naver_blog(query, display=2):
+    headers = {
+        "X-NCP-APIGW-API-KEY-ID": config.NAVER_CLIENT_ID,
+        "X-NCP-APIGW-API-KEY": config.NAVER_CLIENT_SECRET,
+    }
+    params = {"query": query, "display": display, "start": 1, "sort": "sim"}
+    try:
+        response = requests.get(config.NAVER_BLOG_SEARCH_URL, headers=headers, params=params, timeout=5)
+        response.raise_for_status()
+        return response.json().get("items", [])
+    except:
+        return []
+
+def search_naver_image(query, display=1):
+    headers = {
+        "X-NCP-APIGW-API-KEY-ID": config.NAVER_CLIENT_ID,
+        "X-NCP-APIGW-API-KEY": config.NAVER_CLIENT_SECRET,
+    }
+    params = {"query": query, "display": display, "start": 1, "sort": "sim", "filter": "all"}
+    try:
+        response = requests.get(config.NAVER_IMAGE_SEARCH_URL, headers=headers, params=params, timeout=5)
+        response.raise_for_status()
+        return response.json().get("items", [])
+    except:
+        return []
+
 
 def process_api_item(item, query):
     """
@@ -121,6 +147,25 @@ def process_api_item(item, query):
     raw_id = f"{name}_{item.get('address', '')}"
     rest_id = "rest_" + hashlib.md5(raw_id.encode("utf-8")).hexdigest()[:8]
 
+    # 블로그 및 이미지 정보 추가 수집
+    print(f"     -> '{name}' 추가 정보(블로그, 사진) 수집 중...")
+    search_keyword = f"부경대 {name}"
+    
+    blog_items = search_naver_blog(search_keyword, display=2)
+    image_items = search_naver_image(search_keyword, display=1)
+    
+    blog_reviews = []
+    for b in blog_items:
+        blog_reviews.append({
+            "title": clean_html_tags(b.get("title", "")),
+            "description": clean_html_tags(b.get("description", "")),
+            "link": b.get("link", "")
+        })
+        
+    image_url = ""
+    if image_items:
+        image_url = image_items[0].get("link", "")
+
     return {
         "id": rest_id,
         "name": name,
@@ -134,13 +179,15 @@ def process_api_item(item, query):
         "distance_km": round(distance, 2),
         "naver_link": item.get("link", ""),
         "description": item.get("description", ""),
+        "image_url": image_url,
+        "blog_reviews": blog_reviews,
         "crawled_data": {
             "visitor_review_count": 0,
-            "blog_review_count": 0,
+            "blog_review_count": len(blog_reviews),
             "rating": "N/A",
             "keywords": [],
         },
-        "source": "naver_local_api",
+        "source": "naver_api_hub",
         "search_query": query,
         "collected_at": datetime.now().isoformat(),
     }
@@ -353,38 +400,34 @@ def generate_demo_data():
 # 수집기 메인 로직
 # ==============================================================================
 
+def save_chunk(data, chunk_index):
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    file_path = os.path.join(config.DATA_DIR, f"restaurants_chunk_{chunk_index}.json")
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump({"restaurants": data}, f, ensure_ascii=False, indent=2)
+        print(f"  [청크 저장] {file_path} (총 {len(data)}개)")
+    except Exception as e:
+        print(f"  [저장 실패] {e}")
+
 def collect_restaurants(test_mode=False):
-    """
-    네이버 Local Search API를 사용하여 학교 주변 음식점을 수집합니다.
-
-    [수집 흐름]
-    1. 지역 키워드 x 카테고리 조합으로 검색어 생성
-       예: "경성대 한식", "대연동 일식" 등
-    2. 각 검색어로 API 호출 → 결과 수집
-    3. 카텍 좌표 → WGS84 변환
-    4. 학교 기준 반경 10km 필터링
-    5. 중복 제거 (정규화된 이름 + 주소 기준)
-    6. restaurants_db.json에 저장
-
-    Args:
-        test_mode (bool): True이면 첫 번째 카테고리만 테스트
-    """
     print("=" * 60)
-    print(f"  음식점 데이터 수집기 v1.0")
+    print(f"  음식점 데이터 통합 수집기 (Local + Blog + Image)")
     print(f"  학교: {config.SCHOOL_NAME}")
     print(f"  반경: {config.SEARCH_RADIUS_KM}km")
     print(f"  모드: {'데모' if config.DEMO_MODE else 'API'}")
     print("=" * 60)
 
-    # --- 데모 모드: Mock 데이터 사용 ---
     if config.DEMO_MODE:
         all_restaurants = generate_demo_data()
         save_database(all_restaurants)
         return all_restaurants
 
-    # --- API 모드: 실제 네이버 API 호출 ---
     all_restaurants = []
-    seen_names = set()  # 중복 제거용
+    seen_names = set()
+    current_chunk_data = []
+    chunk_index = 1
+    CHUNK_SIZE = 100
 
     # 카테고리 리스트 (테스트 모드면 1개만)
     categories = config.SEARCH_CATEGORIES[:1] if test_mode else config.SEARCH_CATEGORIES
@@ -399,51 +442,50 @@ def collect_restaurants(test_mode=False):
             query = f"{area} {category}"
             print(f"\n[{current_query}/{total_queries}] 검색: '{query}'")
 
-            # API 호출
-            items = search_naver_local(
-                query,
-                display=config.NAVER_LOCAL_SEARCH_DISPLAY,
-            )
+            # 1~100개 검색 (5개씩 20페이지)
+            for page in range(20):
+                start = (page * 5) + 1
+                items = search_naver_local(query, display=5, start=start)
 
-            if items is None:
-                print("  -> API 호출 실패, 건너뜀")
-                continue
+                if items is None or not items:
+                    break  # 더 이상 결과 없음
 
-            if not items:
-                print("  -> 결과 없음")
-                continue
+                for item in items:
+                    # 중복 체크 (HTML 태그 제거 후 정규화)
+                    raw_name = clean_html_tags(item.get("title", ""))
+                    name_norm = normalize_name(raw_name)
+                    if name_norm in seen_names:
+                        continue
+                        
+                    seen_names.add(name_norm)
 
-            print(f"  -> {len(items)}개 결과 수신")
+                    processed = process_api_item(item, query)
 
-            # 각 아이템 처리
-            for item in items:
-                processed = process_api_item(item, query)
+                    # 반경 필터링
+                    if not is_within_radius(processed["lat"], processed["lng"], config.SCHOOL_LAT, config.SCHOOL_LNG, config.SEARCH_RADIUS_KM):
+                        continue
 
-                # 반경 필터링
-                if not is_within_radius(
-                    processed["lat"], processed["lng"],
-                    config.SCHOOL_LAT, config.SCHOOL_LNG,
-                    config.SEARCH_RADIUS_KM,
-                ):
-                    print(f"     [제외] {processed['name']} (반경 외: {format_distance(processed['distance_km'])})")
-                    continue
+                    current_chunk_data.append(processed)
+                    all_restaurants.append(processed)
+                    
+                    # 100개 도달 시 청크 저장
+                    if len(current_chunk_data) >= CHUNK_SIZE:
+                        save_chunk(current_chunk_data, chunk_index)
+                        chunk_index += 1
+                        current_chunk_data = []
 
-                # 중복 체크 (정규화된 이름 기준)
-                if processed["name_normalized"] in seen_names:
-                    continue
+                # Rate Limit 대기
+                time.sleep(0.3)
 
-                seen_names.add(processed["name_normalized"])
-                all_restaurants.append(processed)
-                print(f"     [수집] {processed['name']} ({processed['category']}) - {format_distance(processed['distance_km'])}")
-
-            # API 호출 간 대기 (속도 제한 방지)
-            time.sleep(0.5)
+    # 남은 데이터 마지막 청크 저장
+    if current_chunk_data:
+        save_chunk(current_chunk_data, chunk_index)
 
     print(f"\n{'='*60}")
-    print(f"  수집 완료: 총 {len(all_restaurants)}개 음식점")
+    print(f"  전체 수집 완료: 총 {len(all_restaurants)}개 음식점")
     print(f"{'='*60}")
 
-    # DB 저장
+    # 기존 단일 DB 파일(restaurants_db.json)에도 저장하여 웹 UI 호환성 유지
     save_database(all_restaurants)
 
     return all_restaurants

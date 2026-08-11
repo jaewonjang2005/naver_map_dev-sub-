@@ -20,11 +20,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==============================================================================
-# 네이버 검색 API (developers.naver.com)
-# - 용도: Local Search API로 음식점 검색
+# 네이버 검색 API (NAVER API HUB - NCP)
+# - 용도: 지역(Local), 블로그, 이미지 검색
 # ==============================================================================
-NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
-NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
+DEMO_MODE = not bool(NAVER_CLIENT_ID and NAVER_CLIENT_SECRET)
+
+# NCP API HUB 검색 엔드포인트
+NAVER_LOCAL_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/local"
+NAVER_BLOG_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/blog"
+NAVER_IMAGE_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/image"
 
 # ==============================================================================
 # 네이버 클라우드 플랫폼 Maps API (ncloud.com)
@@ -42,10 +48,10 @@ DEMO_MODE = not (NAVER_CLIENT_ID and NAVER_CLIENT_SECRET)
 # ==============================================================================
 # 학교 정보 설정
 # ==============================================================================
-SCHOOL_NAME = "경성대학교"
-SCHOOL_LAT = 35.1421    # 위도 (latitude)
-SCHOOL_LNG = 129.0669   # 경도 (longitude)
-SEARCH_RADIUS_KM = 0.7  # 검색 반경 (km) - 700m
+SCHOOL_NAME = "부경대학교"
+SCHOOL_LAT = 35.1340802    # 위도 (latitude)
+SCHOOL_LNG = 129.1031735   # 경도 (longitude)
+SEARCH_RADIUS_KM = 0.7     # 검색 반경 (km) - 700m
 
 # ==============================================================================
 # 검색 카테고리 리스트
@@ -69,16 +75,16 @@ SEARCH_CATEGORIES = [
 
 # 검색할 지역 키워드 (학교 주변 지역명)
 SEARCH_AREA_KEYWORDS = [
-    "경성대",
+    "부경대",
     "대연동",
     "못골",
     "남천동",
+    "경성대"
 ]
 
 # ==============================================================================
-# 네이버 Local Search API 설정
+# 네이버 Local Search API 추가 설정
 # ==============================================================================
-NAVER_LOCAL_SEARCH_URL = "https://openapi.naver.com/v1/search/local.json"
 NAVER_LOCAL_SEARCH_DISPLAY = 5   # 한 번에 가져올 결과 수 (최대 5)
 NAVER_LOCAL_SEARCH_SORT = "comment"  # 정렬: random(랜덤), comment(리뷰순)
 
