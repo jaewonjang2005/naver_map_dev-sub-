@@ -3,7 +3,7 @@
 collector.py - 네이버 Local Search API 음식점 수집기
 =====================================================
 학교 주변 음식점 데이터를 네이버 검색 API로 수집하고,
-반경 10km 내의 결과만 필터링하여 restaurants_db.json에 저장합니다.
+반경 700m 내의 결과만 필터링하여 restaurants_db.json에 저장합니다.
 
 [사용법]
   python collector.py          # 전체 수집 실행
