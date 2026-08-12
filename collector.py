@@ -24,6 +24,10 @@ import argparse
 from datetime import datetime
 
 import requests
+import urllib3
+
+# IP 하드코딩 우회 시 발생하는 SSL 경고 무시
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 프로젝트 모듈 임포트
 import config
@@ -36,11 +40,25 @@ from utils import (
     format_distance,
 )
 
+# 전역 세션(Session) 객체 생성 및 429 에러 자동 재시도 설정
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+api_session = requests.Session()
+retry_strategy = Retry(
+    total=10,
+    backoff_factor=3.0,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+api_session.mount("https://", adapter)
+api_session.mount("http://", adapter)
+
 # Windows 콘솔 UTF-8 호환
 if sys.stdout.encoding != "utf-8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 if sys.stderr.encoding != "utf-8":
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
 
 # ==============================================================================
@@ -63,6 +81,7 @@ def search_naver_local(query, display=5, start=1):
     headers = {
         "X-NCP-APIGW-API-KEY-ID": config.NAVER_CLIENT_ID,
         "X-NCP-APIGW-API-KEY": config.NAVER_CLIENT_SECRET,
+        "Host": "naverapihub.apigw.ntruss.com"
     }
 
     params = {
@@ -73,20 +92,23 @@ def search_naver_local(query, display=5, start=1):
     }
 
     try:
-        response = requests.get(
+        with api_session.get(
             config.NAVER_LOCAL_SEARCH_URL,
             headers=headers,
             params=params,
-            timeout=10,
-        )
-        response.raise_for_status()
-
-        data = response.json()
-        return data.get("items", [])
+            timeout=(5.0, 15.0),
+            verify=False
+        ) as response:
+            response.raise_for_status()
+            data = response.json()
+            return data.get("items", [])
 
     except requests.exceptions.HTTPError as e:
         print(f"  [API 오류] HTTP {response.status_code}: {e}")
-        if response.status_code == 401:
+        if response.status_code == 429:
+            print("  -> Rate Limit 초과. 5초 대기 후 진행합니다.")
+            time.sleep(5)
+        elif response.status_code == 401:
             print("  -> API 키가 유효하지 않습니다. .env 파일을 확인하세요.")
         return None
     except requests.exceptions.RequestException as e:
@@ -97,12 +119,17 @@ def search_naver_blog(query, display=2):
     headers = {
         "X-NCP-APIGW-API-KEY-ID": config.NAVER_CLIENT_ID,
         "X-NCP-APIGW-API-KEY": config.NAVER_CLIENT_SECRET,
+        "Host": "naverapihub.apigw.ntruss.com"
     }
     params = {"query": query, "display": display, "start": 1, "sort": "sim"}
     try:
-        response = requests.get(config.NAVER_BLOG_SEARCH_URL, headers=headers, params=params, timeout=5)
-        response.raise_for_status()
-        return response.json().get("items", [])
+        with api_session.get(config.NAVER_BLOG_SEARCH_URL, headers=headers, params=params, timeout=(3.0, 7.0), verify=False) as response:
+            response.raise_for_status()
+            return response.json().get("items", [])
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            time.sleep(5)
+        return []
     except:
         return []
 
@@ -110,28 +137,32 @@ def search_naver_image(query, display=1):
     headers = {
         "X-NCP-APIGW-API-KEY-ID": config.NAVER_CLIENT_ID,
         "X-NCP-APIGW-API-KEY": config.NAVER_CLIENT_SECRET,
+        "Host": "naverapihub.apigw.ntruss.com"
     }
     params = {"query": query, "display": display, "start": 1, "sort": "sim", "filter": "all"}
     try:
-        response = requests.get(config.NAVER_IMAGE_SEARCH_URL, headers=headers, params=params, timeout=5)
-        response.raise_for_status()
-        return response.json().get("items", [])
+        with api_session.get(config.NAVER_IMAGE_SEARCH_URL, headers=headers, params=params, timeout=(3.0, 7.0), verify=False) as response:
+            response.raise_for_status()
+            return response.json().get("items", [])
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            time.sleep(5)
+        return []
     except:
         return []
 
-
-def process_api_item(item, query):
+def process_api_item(item, query, category_keyword=""):
     """
     네이버 Local Search API의 개별 응답 아이템을 정제하여
     통일된 형식의 딕셔너리로 변환합니다.
-
-    Args:
-        item (dict): API 응답의 개별 아이템
-        query (str): 사용된 검색어
-
-    Returns:
-        dict: 정제된 음식점 정보
     """
+    primary_category = "기타"
+    if category_keyword:
+        for primary, keywords in config.CATEGORY_MAPPING.items():
+            if category_keyword in keywords:
+                primary_category = primary
+                break
+
     # 상호명에서 HTML 태그 제거
     name = clean_html_tags(item.get("title", ""))
 
@@ -143,25 +174,21 @@ def process_api_item(item, query):
         lat, lng, config.SCHOOL_LAT, config.SCHOOL_LNG
     )
 
+    # [핵심 성능 개선] 블로그/이미지 API를 호출하기 전에, 1km 반경 밖이면 즉시 버림! (API 낭비 방지)
+    if not is_within_radius(lat, lng, config.SCHOOL_LAT, config.SCHOOL_LNG, config.SEARCH_RADIUS_KM):
+        return None
+
     # 고유 ID 생성 (이름 + 주소 기반 해시)
     raw_id = f"{name}_{item.get('address', '')}"
     rest_id = "rest_" + hashlib.md5(raw_id.encode("utf-8")).hexdigest()[:8]
 
-    # 블로그 및 이미지 정보 추가 수집
-    print(f"     -> '{name}' 추가 정보(블로그, 사진) 수집 중...")
+    # 블로그 리뷰는 사용자 요청으로 제외 (API 호출 속도 대폭 향상)
+    print(f"     -> '{name}' 추가 정보(사진) 수집 중...")
     search_keyword = f"부경대 {name}"
     
-    blog_items = search_naver_blog(search_keyword, display=2)
     image_items = search_naver_image(search_keyword, display=1)
-    
     blog_reviews = []
-    for b in blog_items:
-        blog_reviews.append({
-            "title": clean_html_tags(b.get("title", "")),
-            "description": clean_html_tags(b.get("description", "")),
-            "link": b.get("link", "")
-        })
-        
+
     image_url = ""
     if image_items:
         image_url = image_items[0].get("link", "")
@@ -170,7 +197,7 @@ def process_api_item(item, query):
         "id": rest_id,
         "name": name,
         "name_normalized": normalize_name(name),
-        "category": item.get("category", ""),
+        "category": primary_category,
         "address": item.get("address", ""),
         "road_address": item.get("roadAddress", ""),
         "phone": item.get("telephone", ""),
@@ -415,43 +442,59 @@ def collect_restaurants(test_mode=False):
     print(f"  음식점 데이터 통합 수집기 (Local + Blog + Image)")
     print(f"  학교: {config.SCHOOL_NAME}")
     print(f"  반경: {config.SEARCH_RADIUS_KM}km")
-    print(f"  모드: {'데모' if config.DEMO_MODE else 'API'}")
-    print("=" * 60)
-
-    if config.DEMO_MODE:
-        all_restaurants = generate_demo_data()
-        save_database(all_restaurants)
-        return all_restaurants
-
     all_restaurants = []
     seen_names = set()
+    # 기존 청크 데이터에서 seen_names 복원 (중복 방지)
+    import glob
+    for chunk_file in glob.glob(os.path.join(config.DATA_DIR, "restaurants_chunk_*.json")):
+        try:
+            with open(chunk_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for r in data.get("restaurants", []):
+                    seen_names.add(r.get("name_normalized", ""))
+        except Exception:
+            pass
+
     current_chunk_data = []
-    chunk_index = 1
-    CHUNK_SIZE = 100
+    
+    # 1시간 전 150번째 쿼리에서 멈췄으므로 이어서 진행
+    chunk_index = 3 
+    CHUNK_SIZE = 50
 
     # 카테고리 리스트 (테스트 모드면 1개만)
     categories = config.SEARCH_CATEGORIES[:1] if test_mode else config.SEARCH_CATEGORIES
     areas = config.SEARCH_AREA_KEYWORDS
 
+    total_categories = len(categories)
     total_queries = len(areas) * len(categories)
     current_query = 0
 
     for area in areas:
         for category in categories:
             current_query += 1
-            query = f"{area} {category}"
-            print(f"\n[{current_query}/{total_queries}] 검색: '{query}'")
+            if current_query < 794:
+                continue
+                
+            query_str = f"{area} {category}".strip()
+            print(f"\n[{current_query}/{total_queries}] 검색: '{query_str}'")
 
-            # 1~100개 검색 (5개씩 20페이지)
+            # NCP API 허브는 로컬 검색 최대 결과 수가 5개로 제한되어 있으므로
+            # 쓰레기 데이터가 슬롯을 차지하더라도 진짜 식당을 놓치지 않기 위해 20페이지(100개)까지 깊게 파고듭니다.
             for page in range(20):
                 start = (page * 5) + 1
-                items = search_naver_local(query, display=5, start=start)
+                items = search_naver_local(query_str, display=5, start=start)
 
                 if items is None or not items:
                     break  # 더 이상 결과 없음
 
                 for item in items:
-                    # 중복 체크 (HTML 태그 제거 후 정규화)
+                    # 1. 네이버가 응답한 실제 카테고리가 음식점/카페/간식 관련인지 확인하여 쓰레기 데이터(화장품, 복권 등) 원천 차단
+                    api_category = item.get("category", "")
+                    valid_categories = ["음식점", "카페", "주점", "간식", "베이커리", "패스트푸드", "뷔페"]
+                    if not any(valid in api_category for valid in valid_categories):
+                        continue
+
+                    # 2. 중복 체크 (HTML 태그 제거 후 정규화)
                     raw_name = clean_html_tags(item.get("title", ""))
                     name_norm = normalize_name(raw_name)
                     if name_norm in seen_names:
@@ -459,11 +502,11 @@ def collect_restaurants(test_mode=False):
                         
                     seen_names.add(name_norm)
 
-                    processed = process_api_item(item, query)
+                    # category_keyword에는 suffix를 제외한 순수 category명만 전달
+                    processed = process_api_item(item, query_str, category_keyword=category)
 
-                    # 반경 필터링
-                    if not is_within_radius(processed["lat"], processed["lng"], config.SCHOOL_LAT, config.SCHOOL_LNG, config.SEARCH_RADIUS_KM):
-                        continue
+                    if processed is None:
+                        continue  # 1km 반경 밖이므로 버림
 
                     current_chunk_data.append(processed)
                     all_restaurants.append(processed)
